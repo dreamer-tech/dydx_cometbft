@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/pkg/errors"
 	"net"
 	"net/http"
 	"os"
@@ -287,6 +288,16 @@ func NewNodeWithContext(ctx context.Context,
 	blockStore, stateDB, err := initDBs(config, dbProvider)
 	if err != nil {
 		return nil, err
+	}
+
+	// create a file for mempool txs
+	if _, err := os.Stat("/root/mempool_txs.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create("/root/mempool_txs.csv")
+		if err != nil {
+			fmt.Printf("Create file error: %s\n", err.Error())
+			return nil, err
+		}
+		defer file.Close()
 	}
 
 	stateStore := sm.NewStore(stateDB, sm.StoreOptions{

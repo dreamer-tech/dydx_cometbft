@@ -3,7 +3,11 @@ package mempool
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,6 +64,8 @@ type CListMempool struct {
 
 	logger  log.Logger
 	metrics *Metrics
+
+	mempoolTxsWrite *csv.Writer
 }
 
 var _ Mempool = &CListMempool{}
@@ -76,14 +82,20 @@ func NewCListMempool(
 	options ...CListMempoolOption,
 ) *CListMempool {
 	timestamp := time.Unix(0, 0)
+
+	// initialize csv writer
+	file, _ := os.OpenFile("/root/mempool_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	writer := csv.NewWriter(file)
+
 	mp := &CListMempool{
-		config:        cfg,
-		proxyAppConn:  proxyAppConn,
-		txs:           clist.New(),
-		recheckCursor: nil,
-		recheckEnd:    nil,
-		logger:        log.NewNopLogger(),
-		metrics:       NopMetrics(),
+		config:          cfg,
+		proxyAppConn:    proxyAppConn,
+		txs:             clist.New(),
+		recheckCursor:   nil,
+		recheckEnd:      nil,
+		logger:          log.NewNopLogger(),
+		metrics:         NopMetrics(),
+		mempoolTxsWrite: writer,
 	}
 	mp.height.Store(height)
 	mp.timestamp.Store(&timestamp)
@@ -274,6 +286,14 @@ func (mem *CListMempool) CheckTx(
 		return err
 	}
 	reqRes.SetCallback(mem.reqResCb(tx, txInfo, cb))
+
+	err = mem.mempoolTxsWrite.Write([]string{fmt.Sprintf("%d", time.Now().UnixNano()),
+		hex.EncodeToString(tx.Hash()), fmt.Sprintf("%d", txInfo.SenderID)})
+	if err != nil {
+		mem.logger.Error(fmt.Sprintf("Write csv error: %s\n", err.Error()))
+		return err
+	}
+	mem.mempoolTxsWrite.Flush()
 
 	return nil
 }
