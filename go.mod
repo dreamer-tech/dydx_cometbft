@@ -1,4 +1,4 @@
-module github.com/dreamer-tech/dydx_cometbft
+module github.com/cometbft/cometbft
 
 go 1.21
 
