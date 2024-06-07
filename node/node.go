@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
 	"github.com/pkg/errors"
 	"net"
@@ -297,6 +298,9 @@ func NewNodeWithContext(ctx context.Context,
 			fmt.Printf("Create file error: %s\n", err.Error())
 			return nil, err
 		}
+		writer := csv.NewWriter(file)
+		writer.Write([]string{"node initialization"})
+		writer.Flush()
 		defer file.Close()
 	}
 

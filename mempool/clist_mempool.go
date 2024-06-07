@@ -86,6 +86,8 @@ func NewCListMempool(
 	// initialize csv writer
 	file, _ := os.OpenFile("/root/mempool_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	writer := csv.NewWriter(file)
+	writer.Write([]string{"clist mempool initialization"})
+	writer.Flush()
 
 	mp := &CListMempool{
 		config:          cfg,
