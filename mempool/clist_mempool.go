@@ -65,6 +65,7 @@ type CListMempool struct {
 	logger  log.Logger
 	metrics *Metrics
 
+	mempoolTxsMutex *sync.Mutex
 	mempoolTxsWrite *csv.Writer
 }
 
@@ -97,6 +98,7 @@ func NewCListMempool(
 		recheckEnd:      nil,
 		logger:          log.NewNopLogger(),
 		metrics:         NopMetrics(),
+		mempoolTxsMutex: &sync.Mutex{},
 		mempoolTxsWrite: writer,
 	}
 	mp.height.Store(height)
@@ -289,9 +291,9 @@ func (mem *CListMempool) CheckTx(
 	}
 	reqRes.SetCallback(mem.reqResCb(tx, txInfo, cb))
 
-	// lock to avoid concurrent csv writer sue
-	mem.updateMtx.Lock()
-	defer mem.updateMtx.Unlock()
+	// lock to avoid concurrent csv writer use
+	mem.mempoolTxsMutex.Lock()
+	defer mem.mempoolTxsMutex.Unlock()
 
 	err = mem.mempoolTxsWrite.Write([]string{fmt.Sprintf("%d", time.Now().UnixNano()),
 		hex.EncodeToString(tx.Hash()), fmt.Sprintf("%d", txInfo.SenderID)})
