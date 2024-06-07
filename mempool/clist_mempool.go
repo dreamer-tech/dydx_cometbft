@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/cometbft/cometbft/proto/dydxcometbft/clob"
+	cosmostx "github.com/cosmos/cosmos-sdk/types/tx"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -65,8 +67,9 @@ type CListMempool struct {
 	logger  log.Logger
 	metrics *Metrics
 
-	mempoolTxsMutex *sync.Mutex
-	mempoolTxsWrite *csv.Writer
+	mempoolTxsMutex      *sync.Mutex
+	mempoolTxsWrite      *csv.Writer
+	mempoolOrderTxsWrite *csv.Writer
 }
 
 var _ Mempool = &CListMempool{}
@@ -88,18 +91,22 @@ func NewCListMempool(
 
 	// initialize csv writer
 	file, _ := os.OpenFile("/root/mempool_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	writer := csv.NewWriter(file)
+	txsWriter := csv.NewWriter(file)
+
+	file, _ = os.OpenFile("/root/mempool_order_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	orderTxsWriter := csv.NewWriter(file)
 
 	mp := &CListMempool{
-		config:          cfg,
-		proxyAppConn:    proxyAppConn,
-		txs:             clist.New(),
-		recheckCursor:   nil,
-		recheckEnd:      nil,
-		logger:          log.NewNopLogger(),
-		metrics:         NopMetrics(),
-		mempoolTxsMutex: &sync.Mutex{},
-		mempoolTxsWrite: writer,
+		config:               cfg,
+		proxyAppConn:         proxyAppConn,
+		txs:                  clist.New(),
+		recheckCursor:        nil,
+		recheckEnd:           nil,
+		logger:               log.NewNopLogger(),
+		metrics:              NopMetrics(),
+		mempoolTxsMutex:      &sync.Mutex{},
+		mempoolTxsWrite:      txsWriter,
+		mempoolOrderTxsWrite: orderTxsWriter,
 	}
 	mp.height.Store(height)
 	mp.timestamp.Store(&timestamp)
@@ -302,6 +309,36 @@ func (mem *CListMempool) CheckTx(
 		return err
 	}
 	mem.mempoolTxsWrite.Flush()
+
+	// code taken from dydx_helpers/IsShortTermClobOrderTransaction
+	cosmosTx := &cosmostx.Tx{}
+	err = cosmosTx.Unmarshal(tx)
+	if err == nil && cosmosTx.Body != nil && len(cosmosTx.Body.Messages) == 1 {
+		txBytes := cosmosTx.Body.Messages[0].Value
+		if cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgPlaceOrder" {
+			msgPlaceOrder := &clob.MsgPlaceOrder{}
+			err = msgPlaceOrder.Unmarshal(txBytes)
+			if err == nil {
+				// local_ts;order_type;pair_id;order_flags;side;quantums;subticks;tx_hash
+				err = mem.mempoolOrderTxsWrite.Write([]string{
+					fmt.Sprintf("%d", time.Now().UnixNano()),
+					"place_order",
+					fmt.Sprintf("%d", msgPlaceOrder.Order.OrderId.ClobPairId),
+					fmt.Sprintf("%d", msgPlaceOrder.Order.OrderId.OrderFlags),
+					fmt.Sprintf("%d", msgPlaceOrder.Order.Side.String()),
+					fmt.Sprintf("%d", msgPlaceOrder.Order.Quantums),
+					fmt.Sprintf("%d", msgPlaceOrder.Order.Subticks),
+					hex.EncodeToString(tx.Hash()),
+				})
+				if err != nil {
+					mem.logger.Error(fmt.Sprintf("Write mempool order txs csv error: %s\n", err.Error()))
+					return err
+				}
+				mem.mempoolOrderTxsWrite.Flush()
+				//return msgPlaceOrder.Order.OrderId.IsShortTermOrder()
+			}
+		}
+	}
 
 	return nil
 }
