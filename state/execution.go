@@ -3,7 +3,11 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -43,6 +47,8 @@ type BlockExecutor struct {
 	logger log.Logger
 
 	metrics *Metrics
+
+	blocksWrite *csv.Writer
 }
 
 type BlockExecutorOption func(executor *BlockExecutor)
@@ -64,15 +70,22 @@ func NewBlockExecutor(
 	blockStore BlockStore,
 	options ...BlockExecutorOption,
 ) *BlockExecutor {
+	fmt.Println("Block executor initialization")
+
+	// initialize csv writer
+	file, _ := os.OpenFile("/root/blocks.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	writer := csv.NewWriter(file)
+
 	res := &BlockExecutor{
-		store:      stateStore,
-		proxyApp:   proxyApp,
-		eventBus:   types.NopEventBus{},
-		mempool:    mempool,
-		evpool:     evpool,
-		logger:     logger,
-		metrics:    NopMetrics(),
-		blockStore: blockStore,
+		store:       stateStore,
+		proxyApp:    proxyApp,
+		eventBus:    types.NopEventBus{},
+		mempool:     mempool,
+		evpool:      evpool,
+		logger:      logger,
+		metrics:     NopMetrics(),
+		blockStore:  blockStore,
+		blocksWrite: writer,
 	}
 
 	for _, option := range options {
@@ -293,6 +306,22 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	if err != nil {
 		return state, fmt.Errorf("commit failed for application: %v", err)
 	}
+
+	// dump block to csv
+	hashes := make([]string, len(block.Data.Txs))
+	for pos, tx := range block.Data.Txs {
+		hashes[pos] = hex.EncodeToString(tx.Hash())
+	}
+	err = blockExec.blocksWrite.Write([]string{
+		fmt.Sprintf("%d", time.Now().UnixNano()),
+		fmt.Sprintf("%d", block.Time.UnixNano()),
+		fmt.Sprintf("%d", block.Height),
+		strings.Join(hashes, ","),
+	})
+	if err != nil {
+		blockExec.logger.Error(fmt.Sprintf("Write blocks csv error: %s\n", err.Error()))
+	}
+	blockExec.blocksWrite.Flush()
 
 	// Update evpool with the latest state.
 	blockExec.evpool.Update(state, block.Evidence.Evidence)

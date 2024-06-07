@@ -3,7 +3,6 @@ package node
 import (
 	"bytes"
 	"context"
-	"encoding/csv"
 	"fmt"
 	"github.com/pkg/errors"
 	"net"
@@ -286,6 +285,8 @@ func NewNodeWithContext(ctx context.Context,
 	logger log.Logger,
 	options ...Option,
 ) (*Node, error) {
+	fmt.Println("Node initialization")
+
 	blockStore, stateDB, err := initDBs(config, dbProvider)
 	if err != nil {
 		return nil, err
@@ -295,12 +296,19 @@ func NewNodeWithContext(ctx context.Context,
 	if _, err := os.Stat("/root/mempool_txs.csv"); errors.Is(err, os.ErrNotExist) {
 		file, err := os.Create("/root/mempool_txs.csv")
 		if err != nil {
-			fmt.Printf("Create file error: %s\n", err.Error())
+			fmt.Printf("Create mempool file error: %s\n", err.Error())
 			return nil, err
 		}
-		writer := csv.NewWriter(file)
-		writer.Write([]string{"node initialization"})
-		writer.Flush()
+		defer file.Close()
+	}
+
+	// create a file for blocks
+	if _, err := os.Stat("/root/blocks.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create("/root/blocks.csv")
+		if err != nil {
+			fmt.Printf("Create blocks file error: %s\n", err.Error())
+			return nil, err
+		}
 		defer file.Close()
 	}
 

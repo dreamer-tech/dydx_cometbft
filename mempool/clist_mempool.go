@@ -81,13 +81,13 @@ func NewCListMempool(
 	height int64,
 	options ...CListMempoolOption,
 ) *CListMempool {
+	fmt.Println("Clist mempool initialization")
+
 	timestamp := time.Unix(0, 0)
 
 	// initialize csv writer
 	file, _ := os.OpenFile("/root/mempool_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	writer := csv.NewWriter(file)
-	writer.Write([]string{"clist mempool initialization"})
-	writer.Flush()
 
 	mp := &CListMempool{
 		config:          cfg,
@@ -292,7 +292,7 @@ func (mem *CListMempool) CheckTx(
 	err = mem.mempoolTxsWrite.Write([]string{fmt.Sprintf("%d", time.Now().UnixNano()),
 		hex.EncodeToString(tx.Hash()), fmt.Sprintf("%d", txInfo.SenderID)})
 	if err != nil {
-		mem.logger.Error(fmt.Sprintf("Write csv error: %s\n", err.Error()))
+		mem.logger.Error(fmt.Sprintf("Write mempool txs csv error: %s\n", err.Error()))
 		return err
 	}
 	mem.mempoolTxsWrite.Flush()
