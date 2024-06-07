@@ -289,6 +289,10 @@ func (mem *CListMempool) CheckTx(
 	}
 	reqRes.SetCallback(mem.reqResCb(tx, txInfo, cb))
 
+	// lock to avoid concurrent csv writer sue
+	mem.updateMtx.Lock()
+	defer mem.updateMtx.Unlock()
+
 	err = mem.mempoolTxsWrite.Write([]string{fmt.Sprintf("%d", time.Now().UnixNano()),
 		hex.EncodeToString(tx.Hash()), fmt.Sprintf("%d", txInfo.SenderID)})
 	if err != nil {
