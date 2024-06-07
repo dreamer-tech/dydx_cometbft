@@ -319,15 +319,17 @@ func (mem *CListMempool) CheckTx(
 			msgPlaceOrder := &clob.MsgPlaceOrder{}
 			err = msgPlaceOrder.Unmarshal(txBytes)
 			if err == nil {
-				// local_ts;order_type;pair_id;order_flags;side;quantums;subticks;tx_hash
+				// local_ts;order_type;pair_id;order_flags;side;quantums;subticks;subaccount_id_owner;client_id;tx_hash
 				err = mem.mempoolOrderTxsWrite.Write([]string{
 					fmt.Sprintf("%d", time.Now().UnixNano()),
 					"place_order",
 					fmt.Sprintf("%d", msgPlaceOrder.Order.OrderId.ClobPairId),
 					fmt.Sprintf("%d", msgPlaceOrder.Order.OrderId.OrderFlags),
-					fmt.Sprintf("%d", msgPlaceOrder.Order.Side.String()),
+					msgPlaceOrder.Order.Side.String(),
 					fmt.Sprintf("%d", msgPlaceOrder.Order.Quantums),
 					fmt.Sprintf("%d", msgPlaceOrder.Order.Subticks),
+					msgPlaceOrder.Order.OrderId.SubaccountId.Owner,
+					fmt.Sprintf("%d", msgPlaceOrder.Order.OrderId.ClientId),
 					hex.EncodeToString(tx.Hash()),
 				})
 				if err != nil {
