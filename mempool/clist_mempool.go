@@ -305,7 +305,8 @@ func (mem *CListMempool) CheckTx(
 		if cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgPlaceOrder" {
 			msgPlaceOrder := &clob.MsgPlaceOrder{}
 			err = msgPlaceOrder.Unmarshal(txBytes)
-			if err == nil {
+			// dump BTC, ETH, SOL only
+			if err == nil && (msgPlaceOrder.Order.OrderId.ClobPairId == 0 || msgPlaceOrder.Order.OrderId.ClobPairId == 1 || msgPlaceOrder.Order.OrderId.ClobPairId == 5) {
 				// local_ts;order_type;pair_id;order_flags;side;quantums;subticks;subaccount_id_owner;client_id;tx_hash
 				err = mem.mempoolOrderTxsWrite.Write([]string{
 					fmt.Sprintf("%d", time.Now().UnixNano()),
@@ -740,6 +741,11 @@ func (mem *CListMempool) Update(
 	// Update metrics
 	mem.metrics.Size.Set(float64(mem.Size()))
 	mem.metrics.SizeBytes.Set(float64(mem.SizeBytes()))
+
+	mem.logger.Info(
+		"Mempool",
+		"total txs", mem.txs.Len(),
+	)
 
 	return nil
 }

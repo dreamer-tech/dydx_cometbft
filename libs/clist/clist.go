@@ -247,6 +247,7 @@ func New() *CList { return newWithMax(MaxLength) }
 func newWithMax(maxLength int) *CList {
 	l := new(CList)
 	l.maxLen = maxLength
+	fmt.Printf("Clist max len = %d\n", maxLength)
 	return l.Init()
 }
 
