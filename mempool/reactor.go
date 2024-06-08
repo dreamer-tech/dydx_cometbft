@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	cfg "github.com/cometbft/cometbft/config"
@@ -33,7 +34,8 @@ type Reactor struct {
 	activePersistentPeersSemaphore    *semaphore.Weighted
 	activeNonPersistentPeersSemaphore *semaphore.Weighted
 
-	peersWriter *csv.Writer
+	peersWriterMutex *sync.Mutex
+	peersWriter      *csv.Writer
 }
 
 // NewReactor returns a new Reactor with the given config and mempool.
@@ -43,10 +45,11 @@ func NewReactor(config *cfg.MempoolConfig, mempool *CListMempool) *Reactor {
 	peersWriter := csv.NewWriter(file)
 
 	memR := &Reactor{
-		config:      config,
-		mempool:     mempool,
-		ids:         newMempoolIDs(),
-		peersWriter: peersWriter,
+		config:           config,
+		mempool:          mempool,
+		ids:              newMempoolIDs(),
+		peersWriterMutex: &sync.Mutex{},
+		peersWriter:      peersWriter,
 	}
 	memR.BaseReactor = *p2p.NewBaseReactor("Mempool", memR)
 	memR.activePersistentPeersSemaphore = semaphore.NewWeighted(int64(memR.config.ExperimentalMaxGossipConnectionsToPersistentPeers))
@@ -170,17 +173,20 @@ func (memR *Reactor) Receive(e p2p.Envelope) {
 				memR.Logger.Debug("Could not check tx", "tx", ntx.String(), "err", err)
 			}
 			if err == nil {
+				memR.peersWriterMutex.Lock()
+
 				err = memR.peersWriter.Write([]string{
 					fmt.Sprintf("%d", time.Now().UnixNano()),
 					hex.EncodeToString(ntx.Hash()),
 					string(e.Src.ID()),
-					string(e.Src.RemoteIP()),
 					e.Src.RemoteAddr().String(),
 				})
 				if err != nil {
 					memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
 				}
 				memR.peersWriter.Flush()
+
+				memR.peersWriterMutex.Unlock()
 			}
 		}
 	default:
