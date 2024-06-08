@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/cometbft/cometbft/proto/dydxcometbft/clob"
+	cosmostx "github.com/cosmos/cosmos-sdk/types/tx"
 	"os"
 	"sync"
 	"time"
@@ -147,6 +149,37 @@ func (memR *Reactor) RemovePeer(peer p2p.Peer, _ interface{}) {
 	// broadcast routine checks if peer is gone and returns
 }
 
+func (memR *Reactor) DumpPeer(tx types.Tx, e p2p.Envelope) {
+	// code taken from dydx_helpers/IsShortTermClobOrderTransaction
+	cosmosTx := &cosmostx.Tx{}
+	err := cosmosTx.Unmarshal(tx)
+	if err != nil || cosmosTx.Body == nil || len(cosmosTx.Body.Messages) != 1 {
+		return
+	}
+	txBytes := cosmosTx.Body.Messages[0].Value
+	if cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgPlaceOrder" {
+		msgPlaceOrder := &clob.MsgPlaceOrder{}
+		err = msgPlaceOrder.Unmarshal(txBytes)
+		// dump BTC, ETH, SOL only
+		if err == nil && (msgPlaceOrder.Order.OrderId.ClobPairId == 0 || msgPlaceOrder.Order.OrderId.ClobPairId == 1 || msgPlaceOrder.Order.OrderId.ClobPairId == 5) {
+			memR.peersWriterMutex.Lock()
+
+			err = memR.peersWriter.Write([]string{
+				fmt.Sprintf("%d", time.Now().UnixNano()),
+				hex.EncodeToString(tx.Hash()),
+				string(e.Src.ID()),
+				e.Src.RemoteAddr().String(),
+			})
+			if err != nil {
+				memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
+			}
+			memR.peersWriter.Flush()
+
+			memR.peersWriterMutex.Unlock()
+		}
+	}
+}
+
 // Receive implements Reactor.
 // It adds any received transactions to the mempool.
 func (memR *Reactor) Receive(e p2p.Envelope) {
@@ -173,20 +206,7 @@ func (memR *Reactor) Receive(e p2p.Envelope) {
 				memR.Logger.Debug("Could not check tx", "tx", ntx.String(), "err", err)
 			}
 			if err == nil {
-				memR.peersWriterMutex.Lock()
-
-				err = memR.peersWriter.Write([]string{
-					fmt.Sprintf("%d", time.Now().UnixNano()),
-					hex.EncodeToString(ntx.Hash()),
-					string(e.Src.ID()),
-					e.Src.RemoteAddr().String(),
-				})
-				if err != nil {
-					memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
-				}
-				memR.peersWriter.Flush()
-
-				memR.peersWriterMutex.Unlock()
+				memR.DumpPeer(ntx, e)
 			}
 		}
 	default:
