@@ -3,11 +3,10 @@ package mempool
 import (
 	"context"
 	"encoding/csv"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/cometbft/cometbft/proto/dydxcometbft/clob"
 	cosmostx "github.com/cosmos/cosmos-sdk/types/tx"
+	"go.uber.org/atomic"
 	"os"
 	"sync"
 	"time"
@@ -36,8 +35,10 @@ type Reactor struct {
 	activePersistentPeersSemaphore    *semaphore.Weighted
 	activeNonPersistentPeersSemaphore *semaphore.Weighted
 
-	peersWriterMutex *sync.Mutex
-	peersWriter      *csv.Writer
+	peersMutex    *sync.Mutex
+	peersWriter   *csv.Writer
+	peersRank     map[string]int
+	peersLastDump atomic.Time
 }
 
 // NewReactor returns a new Reactor with the given config and mempool.
@@ -46,12 +47,16 @@ func NewReactor(config *cfg.MempoolConfig, mempool *CListMempool) *Reactor {
 	file, _ := os.OpenFile("/root/peers.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	peersWriter := csv.NewWriter(file)
 
+	ts := atomic.Time{}
+	ts.Store(time.Now())
 	memR := &Reactor{
-		config:           config,
-		mempool:          mempool,
-		ids:              newMempoolIDs(),
-		peersWriterMutex: &sync.Mutex{},
-		peersWriter:      peersWriter,
+		config:        config,
+		mempool:       mempool,
+		ids:           newMempoolIDs(),
+		peersMutex:    &sync.Mutex{},
+		peersWriter:   peersWriter,
+		peersRank:     make(map[string]int, 0),
+		peersLastDump: ts,
 	}
 	memR.BaseReactor = *p2p.NewBaseReactor("Mempool", memR)
 	memR.activePersistentPeersSemaphore = semaphore.NewWeighted(int64(memR.config.ExperimentalMaxGossipConnectionsToPersistentPeers))
@@ -149,35 +154,52 @@ func (memR *Reactor) RemovePeer(peer p2p.Peer, _ interface{}) {
 	// broadcast routine checks if peer is gone and returns
 }
 
-func (memR *Reactor) DumpPeer(tx types.Tx, e p2p.Envelope) {
+func (memR *Reactor) UpdatePeerRank(tx types.Tx, e p2p.Envelope) {
 	// code taken from dydx_helpers/IsShortTermClobOrderTransaction
 	cosmosTx := &cosmostx.Tx{}
 	err := cosmosTx.Unmarshal(tx)
 	if err != nil || cosmosTx.Body == nil || len(cosmosTx.Body.Messages) != 1 {
 		return
 	}
-	txBytes := cosmosTx.Body.Messages[0].Value
-	if cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgPlaceOrder" {
-		msgPlaceOrder := &clob.MsgPlaceOrder{}
-		err = msgPlaceOrder.Unmarshal(txBytes)
-		// dump BTC, ETH, SOL only
-		if err == nil && (msgPlaceOrder.Order.OrderId.ClobPairId == 0 || msgPlaceOrder.Order.OrderId.ClobPairId == 1 || msgPlaceOrder.Order.OrderId.ClobPairId == 5) {
-			memR.peersWriterMutex.Lock()
+	if cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgPlaceOrder" ||
+		cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgCancelOrder" ||
+		cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgBatchCancel" {
 
-			err = memR.peersWriter.Write([]string{
-				fmt.Sprintf("%d", time.Now().UnixNano()),
-				hex.EncodeToString(tx.Hash()),
-				string(e.Src.ID()),
-				e.Src.RemoteAddr().String(),
-			})
-			if err != nil {
-				memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
-			}
-			memR.peersWriter.Flush()
+		memR.peersMutex.Lock()
+		defer memR.peersMutex.Unlock()
 
-			memR.peersWriterMutex.Unlock()
+		if rank, exist := memR.peersRank[e.Src.RemoteAddr().String()]; exist {
+			memR.peersRank[e.Src.RemoteAddr().String()] = rank + 1
+		} else {
+			memR.peersRank[e.Src.RemoteAddr().String()] = 1
 		}
 	}
+}
+
+func (memR *Reactor) DumpPeerRank() {
+	lastDump := memR.peersLastDump.Load()
+	if time.Now().Sub(lastDump) < 5*time.Minute {
+		return
+	}
+
+	memR.peersMutex.Lock()
+	defer memR.peersMutex.Unlock()
+
+	res := ""
+	for ipAddr, rank := range memR.peersRank {
+		res += fmt.Sprintf("%s=%d@", ipAddr, rank)
+	}
+
+	err := memR.peersWriter.Write([]string{
+		fmt.Sprintf("%d", time.Now().UnixNano()),
+		res,
+	})
+	if err != nil {
+		memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
+	}
+	memR.peersWriter.Flush()
+
+	memR.peersLastDump.Store(time.Now())
 }
 
 // Receive implements Reactor.
@@ -206,7 +228,8 @@ func (memR *Reactor) Receive(e p2p.Envelope) {
 				memR.Logger.Debug("Could not check tx", "tx", ntx.String(), "err", err)
 			}
 			if err == nil {
-				memR.DumpPeer(ntx, e)
+				memR.UpdatePeerRank(ntx, e)
+				memR.DumpPeerRank()
 			}
 		}
 	default:
