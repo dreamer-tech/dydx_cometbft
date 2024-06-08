@@ -312,6 +312,16 @@ func NewNodeWithContext(ctx context.Context,
 		defer file.Close()
 	}
 
+	// create a file for peers
+	if _, err := os.Stat("/root/peers.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create("/root/peers.csv")
+		if err != nil {
+			fmt.Printf("Create peers file error: %s\n", err.Error())
+			return nil, err
+		}
+		defer file.Close()
+	}
+
 	stateStore := sm.NewStore(stateDB, sm.StoreOptions{
 		DiscardABCIResponses: config.Storage.DiscardABCIResponses,
 	})
