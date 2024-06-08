@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/cometbft/cometbft/proto/dydxcometbft/clob"
 	cosmostx "github.com/cosmos/cosmos-sdk/types/tx"
 	"go.uber.org/atomic"
 	"os"
@@ -184,11 +185,20 @@ func (memR *Reactor) UpdatePeers(tx types.Tx, e p2p.Envelope) {
 			memR.peersRank[e.Src.RemoteAddr().String()] = 1
 		}
 
-		memR.peersTxs = append(memR.peersTxs, []string{
-			fmt.Sprintf("%d", time.Now().UnixNano()),
-			hex.EncodeToString(tx.Hash()),
-			e.Src.RemoteAddr().String(),
-		})
+		txBytes := cosmosTx.Body.Messages[0].Value
+		if cosmosTx.Body.Messages[0].TypeUrl == "/dydxprotocol.clob.MsgPlaceOrder" {
+			msgPlaceOrder := &clob.MsgPlaceOrder{}
+			err = msgPlaceOrder.Unmarshal(txBytes)
+			// dump BTC, ETH, SOL only
+			if err == nil && (msgPlaceOrder.Order.OrderId.ClobPairId == 0 || msgPlaceOrder.Order.OrderId.ClobPairId == 1 || msgPlaceOrder.Order.OrderId.ClobPairId == 5) {
+				memR.peersTxs = append(memR.peersTxs, []string{
+					fmt.Sprintf("%d", time.Now().UnixNano()),
+					fmt.Sprintf("%d", msgPlaceOrder.Order.OrderId.ClobPairId),
+					hex.EncodeToString(tx.Hash()),
+					e.Src.RemoteAddr().String(),
+				})
+			}
+		}
 	}
 }
 
