@@ -292,16 +292,6 @@ func NewNodeWithContext(ctx context.Context,
 		return nil, err
 	}
 
-	// create a file for mempool txs
-	if _, err := os.Stat("/root/mempool_txs.csv"); errors.Is(err, os.ErrNotExist) {
-		file, err := os.Create("/root/mempool_txs.csv")
-		if err != nil {
-			fmt.Printf("Create mempool file error: %s\n", err.Error())
-			return nil, err
-		}
-		defer file.Close()
-	}
-
 	// create a file for mempool order txs
 	if _, err := os.Stat("/root/mempool_order_txs.csv"); errors.Is(err, os.ErrNotExist) {
 		file, err := os.Create("/root/mempool_order_txs.csv")

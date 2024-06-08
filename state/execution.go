@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"encoding/hex"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	abci "github.com/cometbft/cometbft/abci/types"
@@ -208,6 +206,59 @@ func (blockExec *BlockExecutor) ValidateBlock(state State, block *types.Block) e
 	return blockExec.evpool.CheckEvidence(block.Evidence.Evidence)
 }
 
+func (blockExec *BlockExecutor) DumpBlockTakerOrders(blockHeight int64, blockTime time.Time, block *abci.ResponseFinalizeBlock) {
+	// process only MsgProposedOperations transaction where all taker orders are
+	if len(block.TxResults) < 2 {
+		blockExec.logger.Error(fmt.Sprintf("Skip block order dump %d\n", blockHeight))
+		return
+	}
+	if len(block.TxResults[1].Events) == 0 {
+		blockExec.logger.Error(fmt.Sprintf("Skip block order dump %d\n", blockHeight))
+		return
+	}
+	if len(block.TxResults[1].Events[0].Attributes) == 0 {
+		blockExec.logger.Error(fmt.Sprintf("Skip block order dump %d\n", blockHeight))
+		return
+	}
+	if block.TxResults[1].Events[0].Attributes[0].Value != "/dydxprotocol.clob.MsgProposedOperations" {
+		blockExec.logger.Error(fmt.Sprintf("Skip block order dump %d\n", blockHeight))
+		return
+	}
+
+	tx := block.TxResults[1]
+
+	for _, e := range tx.Events {
+		if e.Type != "match" {
+			continue
+		}
+		pairId, quantums, takerIdOwner := "", "", ""
+		for _, a := range e.Attributes {
+			if a.Key == "taker_subaccount" {
+				takerIdOwner = a.Value
+			}
+			if a.Key == "perpetual_id" {
+				pairId = a.Value
+			}
+			if a.Key == "taker_perpetual_quantums_delta_base_quantums" {
+				quantums = a.Value
+			}
+		}
+
+		err := blockExec.blocksWrite.Write([]string{
+			fmt.Sprintf("%d", time.Now().UnixNano()),
+			fmt.Sprintf("%d", blockTime.UnixNano()),
+			fmt.Sprintf("%d", blockHeight),
+			pairId,
+			quantums,
+			takerIdOwner,
+		})
+		if err != nil {
+			blockExec.logger.Error(fmt.Sprintf("Write blocks csv error: %s\n", err.Error()))
+		}
+		blockExec.blocksWrite.Flush()
+	}
+}
+
 // ApplyBlock validates the block against the state, executes it against the app,
 // fires the relevant events, commits the app, and saves the new state and responses.
 // It returns the new state.
@@ -222,6 +273,8 @@ func (blockExec *BlockExecutor) ApplyBlock(
 	// Lock the mempool.
 	blockExec.mempool.Lock()
 	defer blockExec.mempool.Unlock()
+
+	applyBlockStartTime := time.Now()
 
 	// while mempool is Locked, flush to ensure all async requests have completed
 	// in the ABCI app before Commit.
@@ -307,21 +360,15 @@ func (blockExec *BlockExecutor) ApplyBlock(
 		return state, fmt.Errorf("commit failed for application: %v", err)
 	}
 
-	// dump block to csv
-	hashes := make([]string, len(block.Data.Txs))
-	for pos, tx := range block.Data.Txs {
-		hashes[pos] = hex.EncodeToString(tx.Hash())
-	}
-	err = blockExec.blocksWrite.Write([]string{
-		fmt.Sprintf("%d", time.Now().UnixNano()),
-		fmt.Sprintf("%d", block.Time.UnixNano()),
-		fmt.Sprintf("%d", block.Height),
-		strings.Join(hashes, ","),
-	})
-	if err != nil {
-		blockExec.logger.Error(fmt.Sprintf("Write blocks csv error: %s\n", err.Error()))
-	}
-	blockExec.blocksWrite.Flush()
+	applyBlockEndTime := time.Now()
+	blockExec.logger.Info(
+		"Apply block",
+		"height", block.Height,
+		"delay", applyBlockEndTime.Sub(applyBlockStartTime).Milliseconds(),
+	)
+
+	// dump block taker orders to csv
+	blockExec.DumpBlockTakerOrders(block.Height, block.Time, abciResponse)
 
 	// Update evpool with the latest state.
 	blockExec.evpool.Update(state, block.Evidence.Evidence)

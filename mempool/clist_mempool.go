@@ -68,7 +68,6 @@ type CListMempool struct {
 	metrics *Metrics
 
 	mempoolTxsMutex      *sync.Mutex
-	mempoolTxsWrite      *csv.Writer
 	mempoolOrderTxsWrite *csv.Writer
 }
 
@@ -90,10 +89,7 @@ func NewCListMempool(
 	timestamp := time.Unix(0, 0)
 
 	// initialize csv writer
-	file, _ := os.OpenFile("/root/mempool_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	txsWriter := csv.NewWriter(file)
-
-	file, _ = os.OpenFile("/root/mempool_order_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	file, _ := os.OpenFile("/root/mempool_order_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	orderTxsWriter := csv.NewWriter(file)
 
 	mp := &CListMempool{
@@ -105,7 +101,6 @@ func NewCListMempool(
 		logger:               log.NewNopLogger(),
 		metrics:              NopMetrics(),
 		mempoolTxsMutex:      &sync.Mutex{},
-		mempoolTxsWrite:      txsWriter,
 		mempoolOrderTxsWrite: orderTxsWriter,
 	}
 	mp.height.Store(height)
@@ -301,14 +296,6 @@ func (mem *CListMempool) CheckTx(
 	// lock to avoid concurrent csv writer use
 	mem.mempoolTxsMutex.Lock()
 	defer mem.mempoolTxsMutex.Unlock()
-
-	err = mem.mempoolTxsWrite.Write([]string{fmt.Sprintf("%d", time.Now().UnixNano()),
-		hex.EncodeToString(tx.Hash()), fmt.Sprintf("%d", txInfo.SenderID)})
-	if err != nil {
-		mem.logger.Error(fmt.Sprintf("Write mempool txs csv error: %s\n", err.Error()))
-		return err
-	}
-	mem.mempoolTxsWrite.Flush()
 
 	// code taken from dydx_helpers/IsShortTermClobOrderTransaction
 	cosmosTx := &cosmostx.Tx{}
