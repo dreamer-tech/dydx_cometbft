@@ -3,6 +3,7 @@ package mempool
 import (
 	"context"
 	"encoding/csv"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	cosmostx "github.com/cosmos/cosmos-sdk/types/tx"
@@ -35,28 +36,35 @@ type Reactor struct {
 	activePersistentPeersSemaphore    *semaphore.Weighted
 	activeNonPersistentPeersSemaphore *semaphore.Weighted
 
-	peersMutex    *sync.Mutex
-	peersWriter   *csv.Writer
-	peersRank     map[string]int
-	peersLastDump atomic.Time
+	peersMutex         *sync.Mutex
+	peersRankingWriter *csv.Writer
+	peersTxsWriter     *csv.Writer
+	peersRank          map[string]int
+	peersTxs           [][]string
+	peersLastDump      atomic.Time
 }
 
 // NewReactor returns a new Reactor with the given config and mempool.
 func NewReactor(config *cfg.MempoolConfig, mempool *CListMempool) *Reactor {
 	// initialize csv writer
-	file, _ := os.OpenFile("/root/peers.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	peersWriter := csv.NewWriter(file)
+	file, _ := os.OpenFile("~/peers_ranking.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	peersRankingWriter := csv.NewWriter(file)
+
+	file, _ = os.OpenFile("~/peers_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	peersTxsWriter := csv.NewWriter(file)
 
 	ts := atomic.Time{}
 	ts.Store(time.Now())
 	memR := &Reactor{
-		config:        config,
-		mempool:       mempool,
-		ids:           newMempoolIDs(),
-		peersMutex:    &sync.Mutex{},
-		peersWriter:   peersWriter,
-		peersRank:     make(map[string]int, 0),
-		peersLastDump: ts,
+		config:             config,
+		mempool:            mempool,
+		ids:                newMempoolIDs(),
+		peersMutex:         &sync.Mutex{},
+		peersRankingWriter: peersRankingWriter,
+		peersTxsWriter:     peersTxsWriter,
+		peersRank:          make(map[string]int, 0),
+		peersTxs:           make([][]string, 0),
+		peersLastDump:      ts,
 	}
 	memR.BaseReactor = *p2p.NewBaseReactor("Mempool", memR)
 	memR.activePersistentPeersSemaphore = semaphore.NewWeighted(int64(memR.config.ExperimentalMaxGossipConnectionsToPersistentPeers))
@@ -154,7 +162,7 @@ func (memR *Reactor) RemovePeer(peer p2p.Peer, _ interface{}) {
 	// broadcast routine checks if peer is gone and returns
 }
 
-func (memR *Reactor) UpdatePeerRank(tx types.Tx, e p2p.Envelope) {
+func (memR *Reactor) UpdatePeers(tx types.Tx, e p2p.Envelope) {
 	// code taken from dydx_helpers/IsShortTermClobOrderTransaction
 	cosmosTx := &cosmostx.Tx{}
 	err := cosmosTx.Unmarshal(tx)
@@ -173,10 +181,16 @@ func (memR *Reactor) UpdatePeerRank(tx types.Tx, e p2p.Envelope) {
 		} else {
 			memR.peersRank[e.Src.RemoteAddr().String()] = 1
 		}
+
+		memR.peersTxs = append(memR.peersTxs, []string{
+			fmt.Sprintf("%d", time.Now().UnixNano()),
+			hex.EncodeToString(tx.Hash()),
+			e.Src.RemoteAddr().String(),
+		})
 	}
 }
 
-func (memR *Reactor) DumpPeerRank() {
+func (memR *Reactor) DumpPeers() {
 	lastDump := memR.peersLastDump.Load()
 	if time.Now().Sub(lastDump) < 5*time.Minute {
 		return
@@ -190,15 +204,22 @@ func (memR *Reactor) DumpPeerRank() {
 		res += fmt.Sprintf("%s=%d@", ipAddr, rank)
 	}
 
-	err := memR.peersWriter.Write([]string{
+	err := memR.peersRankingWriter.Write([]string{
 		fmt.Sprintf("%d", time.Now().UnixNano()),
 		res,
 	})
 	if err != nil {
 		memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
 	}
-	memR.peersWriter.Flush()
+	memR.peersRankingWriter.Flush()
 
+	err = memR.peersTxsWriter.WriteAll(memR.peersTxs)
+	if err != nil {
+		memR.Logger.Error(fmt.Sprintf("Write peers csv error: %s\n", err.Error()))
+	}
+	memR.peersTxsWriter.Flush()
+
+	memR.peersTxs = make([][]string, 0)
 	memR.peersLastDump.Store(time.Now())
 }
 
@@ -228,8 +249,8 @@ func (memR *Reactor) Receive(e p2p.Envelope) {
 				memR.Logger.Debug("Could not check tx", "tx", ntx.String(), "err", err)
 			}
 			if err == nil {
-				memR.UpdatePeerRank(ntx, e)
-				memR.DumpPeerRank()
+				memR.UpdatePeers(ntx, e)
+				memR.DumpPeers()
 			}
 		}
 	default:

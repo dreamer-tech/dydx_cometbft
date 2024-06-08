@@ -71,7 +71,7 @@ func NewBlockExecutor(
 	fmt.Println("Block executor initialization")
 
 	// initialize csv writer
-	file, _ := os.OpenFile("/root/blocks.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	file, _ := os.OpenFile("~/blocks.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	writer := csv.NewWriter(file)
 
 	res := &BlockExecutor{
