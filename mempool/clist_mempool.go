@@ -88,8 +88,10 @@ func NewCListMempool(
 
 	timestamp := time.Unix(0, 0)
 
+	home, _ := os.UserHomeDir()
+
 	// initialize csv writer
-	file, _ := os.OpenFile("~/mempool_order_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	file, _ := os.OpenFile(home+"/mempool_order_txs.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	orderTxsWriter := csv.NewWriter(file)
 
 	mp := &CListMempool{

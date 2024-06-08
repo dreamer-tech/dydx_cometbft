@@ -292,9 +292,15 @@ func NewNodeWithContext(ctx context.Context,
 		return nil, err
 	}
 
+	home, err := os.UserHomeDir()
+	if err != nil {
+		logger.Error("Error obtaining home directory", err)
+		return nil, err
+	}
+
 	// create a file for mempool order txs
-	if _, err := os.Stat("~/mempool_order_txs.csv"); errors.Is(err, os.ErrNotExist) {
-		file, err := os.Create("~/mempool_order_txs.csv")
+	if _, err := os.Stat(home + "/mempool_order_txs.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create(home + "/mempool_order_txs.csv")
 		if err != nil {
 			fmt.Printf("Create mempool orders file error: %s\n", err.Error())
 			return nil, err
@@ -303,8 +309,8 @@ func NewNodeWithContext(ctx context.Context,
 	}
 
 	// create a file for blocks
-	if _, err := os.Stat("~/blocks.csv"); errors.Is(err, os.ErrNotExist) {
-		file, err := os.Create("~/blocks.csv")
+	if _, err := os.Stat(home + "/blocks.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create(home + "/blocks.csv")
 		if err != nil {
 			fmt.Printf("Create blocks file error: %s\n", err.Error())
 			return nil, err
@@ -313,16 +319,16 @@ func NewNodeWithContext(ctx context.Context,
 	}
 
 	// create a file for peers
-	if _, err := os.Stat("~/peers_ranking.csv"); errors.Is(err, os.ErrNotExist) {
-		file, err := os.Create("~/peers_ranking.csv")
+	if _, err := os.Stat(home + "/peers_ranking.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create(home + "/peers_ranking.csv")
 		if err != nil {
 			fmt.Printf("Create peers file error: %s\n", err.Error())
 			return nil, err
 		}
 		defer file.Close()
 	}
-	if _, err := os.Stat("~/peers_txs.csv"); errors.Is(err, os.ErrNotExist) {
-		file, err := os.Create("~/peers_txs.csv")
+	if _, err := os.Stat(home + "/peers_txs.csv"); errors.Is(err, os.ErrNotExist) {
+		file, err := os.Create(home + "/peers_txs.csv")
 		if err != nil {
 			fmt.Printf("Create peers file error: %s\n", err.Error())
 			return nil, err
