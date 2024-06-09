@@ -746,7 +746,9 @@ func (mem *CListMempool) Update(
 
 	mem.logger.Info(
 		"Mempool",
+		"height", height,
 		"total txs", mem.txs.Len(),
+		"ts", time.Now().String(),
 	)
 
 	return nil
