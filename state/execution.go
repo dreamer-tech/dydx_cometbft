@@ -233,8 +233,11 @@ func (blockExec *BlockExecutor) DumpBlockTakerOrders(blockHeight int64, blockTim
 		if e.Type != "match" {
 			continue
 		}
-		pairId, quantums, takerIdOwner := "", "", ""
+		pairId, quantums, makerIdOwner, takerIdOwner := "", "", "", ""
 		for _, a := range e.Attributes {
+			if a.Key == "maker_subaccount" {
+				makerIdOwner = a.Value
+			}
 			if a.Key == "taker_subaccount" {
 				takerIdOwner = a.Value
 			}
@@ -252,6 +255,7 @@ func (blockExec *BlockExecutor) DumpBlockTakerOrders(blockHeight int64, blockTim
 			fmt.Sprintf("%d", blockHeight),
 			pairId,
 			quantums,
+			makerIdOwner,
 			takerIdOwner,
 		})
 		if err != nil {
